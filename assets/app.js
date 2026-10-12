@@ -1,0 +1,124 @@
+(() => {
+'use strict';
+const $ = (s,root=document) => root.querySelector(s), $$ = (s,root=document) => [...root.querySelectorAll(s)];
+const esc = v => String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const read = (k,fallback) => {try {const v=JSON.parse(localStorage.getItem('rokn-'+k));return v??fallback;}catch{return fallback;}};
+const save = (k,v) => {try {localStorage.setItem('rokn-'+k,JSON.stringify(v));return true;}catch{toast('Browser storage is unavailable. Changes cannot be saved.');return false;}};
+const money = v => 'EGP '+Number(v).toLocaleString('en-EG',{maximumFractionDigits:2});
+let toastTimer;
+function toast(message){const el=$('.toast');if(!el)return;el.textContent=message;el.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.hidden=true,4000);}
+function products(){const data=read('products',window.ROKN_PRODUCTS);return Array.isArray(data)?data:window.ROKN_PRODUCTS;}
+function product(id){return products().find(p=>p.id===id);}
+function getCart(){return read('cart',[]).filter(i=>product(i.id)&&Number.isInteger(i.qty)&&i.qty>0);}
+function favorites(){return read('wishlist',[]);}
+function isFavorite(id){return favorites().includes(id);}
+function favorite(id){let list=favorites();list=list.includes(id)?list.filter(v=>v!==id):[...list,id];if(!save('wishlist',list))return;updateFavorites();if(page==='wishlist')renderWishlist();toast(list.includes(id)?'Saved to your wishlist':'Removed from your wishlist');}
+function updateFavorites(){$$('[data-favorite]').forEach(b=>{const selected=isFavorite(b.dataset.favorite);b.setAttribute('aria-pressed',String(selected));b.innerHTML=selected?'♥':'♡';b.setAttribute('aria-label',(selected?'Remove from':'Add to')+' wishlist');});if($('#product-favorite')){const b=$('#product-favorite');b.setAttribute('aria-pressed',String(isFavorite(currentProduct.id)));b.textContent=isFavorite(currentProduct.id)?'♥':'♡';}}
+function updateCounts(){const qty=getCart().reduce((n,i)=>n+i.qty,0);$$('[data-cart-count]').forEach(el=>el.textContent=qty);}
+function addCart(id,qty=1,size='Medium'){
+ const p=product(id);if(!p||p.stock===0){toast('This product is currently out of stock');return false;}
+ let cart=getCart();const totalQty=cart.filter(i=>i.id===id).reduce((n,i)=>n+i.qty,0);
+ if(totalQty+qty>p.stock){toast('Only '+p.stock+' available in stock');return false;}
+ const row=cart.find(i=>i.id===id&&i.size===size);if(row)row.qty+=qty;else cart.push({id,qty,size});
+ if(!save('cart',cart))return false;updateCounts();toast('Added to your cart');return true;
+}
+function card(p){return `<article class="product-card"><button class="icon-btn card-favorite" data-favorite="${esc(p.id)}" aria-label="Add to wishlist" aria-pressed="${isFavorite(p.id)}">${isFavorite(p.id)?'♥':'♡'}</button><a class="product-image" href="product.html?id=${encodeURIComponent(p.id)}"><img src="${esc(p.image)}" alt="${esc(p.name)}" loading="lazy">${p.new?'<span class="badge">New Arrival</span>':''}${p.stock===0?'<span class="badge" style="top:auto;bottom:20px">Out of stock</span>':''}</a><div class="card-meta"><a href="product.html?id=${encodeURIComponent(p.id)}">${esc(p.name)}</a><span class="price">${money(p.price)}</span></div><p>${esc(p.description)}</p></article>`;}
+const page=document.body.dataset.page;
+window.Rokn={read,save,products,product,getCart,money,esc,toast,card,updateCounts};
+// Storage remains optional; seed exactly once with the three items shown in the supplied cart design.
+if(read('initialized',false)!==true){save('cart',[{id:'vase',qty:1,size:'Medium'},{id:'armchair',qty:1,size:'Medium'},{id:'table',qty:1,size:'Medium'}]);save('initialized',true);}
+function updateTheme(){const dark=document.documentElement.dataset.theme==='dark';$$('[data-theme-toggle]').forEach(b=>{b.innerHTML=`<i class="fa-solid fa-${dark?'sun':'moon'}" aria-hidden="true"></i>`;b.setAttribute('aria-label',dark?'Switch to cream light mode':'Switch to brown dark mode');b.setAttribute('aria-pressed',String(dark));});}
+$$('[data-theme-toggle]').forEach(b=>b.addEventListener('click',()=>{const value=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=value;try{localStorage.setItem('rokn-theme',value);}catch{}updateTheme();}));updateTheme();updateCounts();
+$('[data-menu-toggle]')?.addEventListener('click',e=>{const nav=$('#mobile-menu');nav.hidden=!nav.hidden;e.currentTarget.setAttribute('aria-expanded',String(!nav.hidden));});
+document.addEventListener('click',e=>{
+ const favoriteButton=e.target.closest('[data-favorite]');if(favoriteButton){favorite(favoriteButton.dataset.favorite);return;}
+ const open=e.target.closest('[data-open]');if(open){$('#'+open.dataset.open)?.showModal();}
+ const close=e.target.closest('[data-close]');if(close)close.closest('dialog')?.close();
+});
+$$('[data-newsletter]').forEach(form=>form.addEventListener('submit',e=>{e.preventDefault();const email=form.elements.email.value.trim();if(save('newsletter-email',email)){toast('Subscription saved for this demo — use ROKN10 at checkout.');form.reset();}}));
+$$('[data-inquiry]').forEach(form=>form.addEventListener('submit',e=>{e.preventDefault();const row=Object.fromEntries(new FormData(form));row.type=form.dataset.inquiry;row.date=new Date().toISOString();const inquiries=read('inquiries',[]);inquiries.push(row);if(save('inquiries',inquiries)){toast('Inquiry saved on this device');form.reset();form.closest('dialog').close();}}));
+$$('[data-products="featured"]').forEach(el=>{el.innerHTML=products().filter(p=>/^p[1-4]$/.test(p.id)).map(card).join('');});
+$$('[data-carousel]').forEach(section=>{$$('[data-slide]',section).forEach(button=>button.addEventListener('click',()=>{const index=+button.dataset.slide;$$('[data-slide]',section).forEach(b=>{b.classList.toggle('active',b===button);b.setAttribute('aria-pressed',String(b===button));});const items=section.dataset.carousel==='reviews'?$$('.review',section):$$('.product-card',section);if(window.innerWidth<=650){const grid=section.dataset.carousel==='reviews'?$('.reviews-grid',section):$('.product-grid',section);grid?.scrollTo({left:items[index]?.offsetLeft-grid.offsetLeft,behavior:'smooth'});}else if(section.dataset.carousel==='reviews'){items.forEach((item,i)=>item.style.order=String((i-index+items.length)%items.length));}}));});
+let filterState={q:'',categories:[],max:15000,color:'',sort:'newest',page:1};
+function filteredProducts(){let items=products().filter(p=>p.id!=='detail');const {q,categories,max,color,sort}=filterState;
+ items=items.filter(p=>(!q||`${p.name} ${p.category}`.toLowerCase().includes(q.toLowerCase()))&&(!categories.length||categories.includes(p.category))&&p.price<=max&&(!color||p.color===color));
+ if(sort==='price-asc')items.sort((a,b)=>a.price-b.price);else if(sort==='price-desc')items.sort((a,b)=>b.price-a.price);else if(sort==='name')items.sort((a,b)=>a.name.localeCompare(b.name));else items.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));return items;}
+function renderCollection(){const items=filteredProducts(),perPage=12,pages=Math.max(1,Math.ceil(items.length/perPage));filterState.page=Math.min(filterState.page,pages);const shown=items.slice((filterState.page-1)*perPage,filterState.page*perPage);
+ $('#product-count').textContent=`SHOWING ${shown.length} OF ${items.length} PRODUCTS`;
+ $('#collection-grid').innerHTML=shown.length?shown.map(card).join(''):'<div class="empty-state" style="grid-column:1/-1"><h3>No matching products</h3><p>Try another search or reset the filters.</p></div>';
+ $('#pagination').innerHTML=Array.from({length:pages},(_,i)=>`<button data-page-number="${i+1}" class="${i+1===filterState.page?'active':''}" aria-label="Page ${i+1}" ${i+1===filterState.page?'aria-current="page"':''}>${i+1}</button>`).join('')+(pages>1?`<button data-page-number="${Math.min(pages,filterState.page+1)}" aria-label="Next page" ${filterState.page===pages?'disabled':''}>→</button>`:'');
+}
+if(page==='collection'){
+ const params=new URLSearchParams(location.search);filterState.q=params.get('q')||'';$('#filter-search').value=filterState.q;
+ if(params.get('category'))filterState.categories=[params.get('category')];$$('#filters input[name=category]').forEach(c=>c.checked=filterState.categories.includes(c.value));
+ $('#price-range').addEventListener('input',e=>$('#price-label').textContent=money(e.target.value));
+ $$('[data-color]').forEach(b=>b.addEventListener('click',()=>{const selected=b.classList.contains('selected');$$('[data-color]').forEach(x=>{x.classList.remove('selected');x.setAttribute('aria-pressed','false');});if(!selected){b.classList.add('selected');b.setAttribute('aria-pressed','true');}}));
+ function applyFilters(){filterState.q=$('#filter-search').value.trim();filterState.categories=$$('#filters input[name=category]:checked').map(c=>c.value);filterState.max=+$('#price-range').value;filterState.color=$('[data-color].selected')?.dataset.color||'';filterState.page=1;renderCollection();}
+ $('#apply-filter').addEventListener('click',applyFilters);$('#filter-search').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();applyFilters();}});
+ $('#clear-filter').addEventListener('click',()=>{$('#filter-search').value='';$$('#filters input[name=category]').forEach(c=>c.checked=false);$('#price-range').value=15000;$('#price-label').textContent=money(15000);$$('[data-color]').forEach(b=>{b.classList.remove('selected');b.setAttribute('aria-pressed','false');});applyFilters();});
+ $('#product-sort').addEventListener('change',e=>{filterState.sort=e.target.value;filterState.page=1;renderCollection();});
+ $('#pagination').addEventListener('click',e=>{const b=e.target.closest('[data-page-number]');if(!b)return;filterState.page=+b.dataset.pageNumber;renderCollection();$('.collection-layout').scrollIntoView({behavior:'smooth'});});
+ $('[data-filter-toggle]').addEventListener('click',e=>{const panel=$('#filters');panel.classList.toggle('open');e.currentTarget.setAttribute('aria-expanded',String(panel.classList.contains('open')));});renderCollection();
+}
+let currentProduct=product(new URLSearchParams(location.search).get('id'))||product('detail'),productQty=1,productSize='Medium';
+function chooseTab(name,focus=false){$$('[data-tab]').forEach(b=>{const active=b.dataset.tab===name;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active));b.tabIndex=active?0:-1;if(active&&focus)b.focus();});$$('[role=tabpanel]').forEach(p=>p.hidden=p.id!=='panel-'+name);}
+if(page==='product'){
+ const p=currentProduct;document.title=p.name+' | ROKN';$('#product-name').textContent=p.name;$('#product-main-image').src=p.image;$('#product-main-image').alt=p.name;$$('[data-product-image] img').forEach(img=>img.src=p.image);$('#product-price').textContent=money(p.price);$('#product-old-price').textContent=money(p.id==='detail'?2200:Math.round(p.price/0.84));
+ if(p.stock===0){$('#add-to-cart').disabled=true;$('#product-stock-message').hidden=false;$('#product-stock-message').textContent='Currently out of stock';}
+ $$('[data-size]').forEach(b=>b.addEventListener('click',()=>{productSize=b.dataset.size;$$('[data-size]').forEach(x=>{x.classList.toggle('selected',x===b);x.setAttribute('aria-pressed',String(x===b));});}));
+ $$('[data-product-qty]').forEach(b=>b.addEventListener('click',()=>{productQty=Math.max(1,Math.min(p.stock||1,productQty+ +b.dataset.productQty));$('#product-quantity').textContent=productQty;}));
+ $('#add-to-cart').addEventListener('click',()=>addCart(p.id,productQty,productSize));$('#product-favorite').addEventListener('click',()=>favorite(p.id));updateFavorites();
+ $$('[data-product-image]').forEach(b=>b.addEventListener('click',()=>{$$('[data-product-image]').forEach(x=>{x.classList.toggle('selected',x===b);x.setAttribute('aria-pressed',String(x===b));});$('#product-main-image').style.objectPosition=['center','20% center','80% center'][+b.dataset.productImage];}));
+ $$('[data-tab]').forEach(b=>b.addEventListener('click',()=>chooseTab(b.dataset.tab)));$('.product-tabs').addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const tabs=$$('[data-tab]');let idx=tabs.findIndex(b=>b.getAttribute('aria-selected')==='true');idx=e.key==='Home'?0:e.key==='End'?2:(idx+(e.key==='ArrowRight'?1:2))%3;chooseTab(tabs[idx].dataset.tab,true);});chooseTab('reviews');
+ $('[data-show-reviews]').addEventListener('click',()=>{chooseTab('reviews');$('.product-tabs').scrollIntoView({behavior:'smooth'});});
+}
+function renderWishlist(){const list=favorites().map(product).filter(Boolean);$('#wishlist-grid').innerHTML=list.length?list.map(card).join(''):'<div class="empty-state" style="grid-column:1/-1"><h3>Your wishlist is empty</h3><p>Save the pieces you love by tapping the heart.</p><a class="btn" href="collection.html">Explore the collection</a></div>';}
+if(page==='wishlist')renderWishlist();
+let discountCode=read('coupon','');
+function totals(shipping='standard'){
+ const cart=getCart(),subtotal=cart.reduce((n,i)=>n+product(i.id).price*i.qty,0);const discount=discountCode==='ROKN10'?Math.round(subtotal*10)/100:0;const fee=cart.length?(shipping==='express'?550:subtotal>=2000?0:250):0;return {subtotal,discount,shipping:fee,total:subtotal-discount+fee,qty:cart.reduce((n,i)=>n+i.qty,0)};
+}
+function couponMarkup(){return `<form class="coupon" data-coupon><input name="coupon" aria-label="Coupon code" placeholder="Coupon code" value="${esc(discountCode)}"><button class="btn">Apply</button></form>`;}
+function summaryMarkup(checkout=false){const t=totals(checkout?$('input[name=shipping]:checked')?.value:'standard');return `<h3>Order Summary</h3>${checkout?getCart().map(i=>{const p=product(i.id);return `<div class="summary-mini"><img src="${esc(p.image)}" alt=""><div><strong>${esc(p.name)}</strong><small>${esc(i.size)} · Qty ${i.qty}</small><span>${money(p.price*i.qty)}</span></div></div>`;}).join(''):''}${couponMarkup()}<div class="summary-row"><span>Subtotal</span><span>${money(t.subtotal)}</span></div>${t.discount?`<div class="summary-row"><span>Discount</span><span>− ${money(t.discount)}</span></div>`:''}<div class="summary-row"><span>Shipping</span>${checkout?`<span>${t.shipping?money(t.shipping):'Free'}</span>`:'<small>Calculated at next step</small>'}</div><div class="summary-row summary-total"><span>Total</span><span>${money(checkout?t.total:t.subtotal-t.discount)}</span></div>${!checkout?`<a class="btn btn-full" href="checkout.html" ${!getCart().length?'aria-disabled="true" tabindex="-1" style="pointer-events:none;opacity:.5"':''}>PROCEED TO CHECKOUT</a>`:''}`;}
+function renderCart(){const cart=getCart();$('#cart-list').innerHTML=cart.length?cart.map((i,index)=>{const p=product(i.id);return `<article class="cart-item"><button class="remove-item" data-remove-cart="${index}" aria-label="Remove ${esc(p.name)}">×</button><div class="cart-item-main"><a href="product.html?id=${encodeURIComponent(p.id)}"><img src="${esc(p.image)}" alt="${esc(p.name)}"></a><div><h3><a href="product.html?id=${encodeURIComponent(p.id)}">${esc(p.name)}</a></h3><p>${esc(i.size)}${p.description===i.size?'':' · '+esc(p.description)}</p></div><div class="cart-item-right"><div class="quantity"><button data-cart-qty="${index}" data-delta="-1" aria-label="Decrease ${esc(p.name)} quantity">−</button><output>${i.qty}</output><button data-cart-qty="${index}" data-delta="1" aria-label="Increase ${esc(p.name)} quantity">+</button></div><span class="cart-item-price">${money(p.price*i.qty)}</span></div></div><hr><a class="text-link" href="collection.html">← Continue Shopping</a></article>`;}).join(''):'<div class="empty-state"><h3>Your cart is empty</h3><p>Find a piece that makes your space feel like home.</p><a href="collection.html" class="btn">Continue shopping</a></div>';$('#clear-cart').hidden=!cart.length;$('#cart-summary').innerHTML=summaryMarkup();updateCounts();}
+if(page==='cart'){renderCart();$('#cart-list').addEventListener('click',e=>{const remove=e.target.closest('[data-remove-cart]'),qty=e.target.closest('[data-cart-qty]');let cart=getCart();if(remove)cart.splice(+remove.dataset.removeCart,1);else if(qty){let item=cart[+qty.dataset.cartQty],p=product(item.id),delta=+qty.dataset.delta;if(item.qty+delta<1)return;const allQty=cart.filter(i=>i.id===p.id).reduce((n,i)=>n+i.qty,0);if(delta>0&&allQty>=p.stock){toast('No more stock available');return;}item.qty+=delta;}else return;if(save('cart',cart))renderCart();});$('#clear-cart').addEventListener('click',()=>{if(save('cart',[]))renderCart();});}
+document.addEventListener('submit',e=>{if(!e.target.matches('[data-coupon]'))return;e.preventDefault();const code=e.target.elements.coupon.value.trim().toUpperCase();if(code&&code!=='ROKN10'){toast('Coupon not found. Demo coupon: ROKN10');return;}discountCode=code;save('coupon',code);if(page==='cart')renderCart();else if(page==='checkout')$('#checkout-summary').innerHTML=summaryMarkup(true);toast(code?'10% discount applied':'Coupon removed');});
+if(page==='checkout'){
+ const standard=$('input[name=shipping][value=standard]');if(standard)$('.option-price',standard.closest('label')).textContent=totals('standard').shipping?money(totals('standard').shipping):'Free';
+ $('#checkout-summary').innerHTML=summaryMarkup(true);if(!getCart().length){$('#checkout-form').hidden=true;$('#checkout-summary').innerHTML='<h3>Your cart is empty</h3><a class="btn" href="collection.html">Shop now</a>';}
+ $$('input[name=shipping]').forEach(input=>input.addEventListener('change',()=>$('#checkout-summary').innerHTML=summaryMarkup(true)));
+ $('#checkout-form').addEventListener('submit',e=>{e.preventDefault();const form=e.target;if(!form.reportValidity())return;const cart=getCart();if(!cart.length)return;const stockError=cart.find(i=>cart.filter(row=>row.id===i.id).reduce((sum,row)=>sum+row.qty,0)>product(i.id).stock);if(stockError){$('#checkout-error').hidden=false;$('#checkout-error').textContent='Some items no longer have enough stock. Please update your cart.';return;}
+ const contact=Object.fromEntries(new FormData(form));const t=totals(contact.shipping);const order={id:'RK-'+Date.now().toString().slice(-8),date:new Date().toISOString(),contact,items:cart.map(i=>({...i,name:product(i.id).name,image:product(i.id).image,price:product(i.id).price})),...t,status:'Processing',payment:contact.payment};const orders=read('orders',[]);orders.unshift(order);if(!save('orders',orders))return;
+ const updated=products().map(p=>({...p,stock:p.stock-cart.filter(i=>i.id===p.id).reduce((n,i)=>n+i.qty,0)}));save('products',updated);save('last-order',order.id);save('cart',[]);save('coupon','');location.href='thankyou.html';});
+}
+function receiptRows(o){return `<div class="summary-row"><span>Items</span><span>${o.qty}</span></div><div class="summary-row"><span>Subtotal</span><span>${money(o.subtotal)}</span></div>${o.discount?`<div class="summary-row"><span>Discount</span><span>− ${money(o.discount)}</span></div>`:''}<div class="summary-row"><span>Shipping</span><span>${o.shipping?money(o.shipping):'Free'}</span></div><div class="summary-row summary-total"><span>Total</span><span>${money(o.total)}</span></div>`;}
+if(page==='thankyou'){
+ const order=read('orders',[]).find(o=>o.id===read('last-order',''));if(!order){$('#receipt').hidden=true;$('#no-order').hidden=false;}else{
+ $('#receipt-details').innerHTML=[['Order Number',order.id],['Order Time',new Date(order.date).toLocaleString()],['Payment Method',order.payment+' (demo)'],['Name',order.contact.firstName+' '+order.contact.lastName]].map(([label,value])=>`<div><dt>${label}</dt><dd>${esc(value)}</dd></div>`).join('');
+ $('#receipt-summary').innerHTML=`<h3>Order Summary</h3><hr>${receiptRows(order)}<a class="btn btn-full" href="collection.html">CONTINUE SHOPPING</a><div class="receipt-actions"><button class="text-link" id="print-receipt" style="background:transparent;color:var(--ink)">Print / Save PDF Receipt</button><a class="text-link" href="account.html">Track Order →</a></div>`;$('#print-receipt').addEventListener('click',()=>window.print());}}
+const session=()=>{const persistent=read('session',null);if(persistent)return persistent;try{return JSON.parse(sessionStorage.getItem('rokn-session'));}catch{return null;}};
+window.Rokn.session=session;
+function setSession(profile,remember=false){try{if(remember){save('session',profile);sessionStorage.removeItem('rokn-session');}else{localStorage.removeItem('rokn-session');sessionStorage.setItem('rokn-session',JSON.stringify(profile));}}catch{toast('Could not remember your demo profile');}}
+if(page==='account'){
+ const profile=session(),orders=read('orders',[]);if(!profile){$('#account-content').innerHTML='<div class="empty-state"><h3>Welcome to Rokn</h3><p>Sign in to a demo profile to view your account.</p><a class="btn" href="login.html">Login</a> <a class="btn btn-outline" href="signup.html">Create account</a></div>';}
+ else {const own=orders.filter(o=>o.contact.email.toLowerCase()===profile.email.toLowerCase());$('#account-content').innerHTML=`<div class="account-layout"><aside class="account-links"><a href="wishlist.html">Wishlist</a><a href="cart.html">Shopping cart</a><button class="btn btn-outline" id="logout">Sign out</button></aside><div><section class="panel"><h3>Welcome, ${esc(profile.name)}</h3><p class="muted" style="margin-top:16px">${esc(profile.email)}</p></section><section class="section"><h3 style="margin-bottom:24px">Your demo orders</h3><div class="account-orders">${own.length?own.map(o=>`<article class="panel"><div class="row-between"><strong>${esc(o.id)}</strong><span class="status-pill">${esc(o.status)}</span></div><p class="muted" style="margin-top:16px">${new Date(o.date).toLocaleDateString()} · ${o.qty} items · ${money(o.total)}</p></article>`).join(''):'<p>No orders for this email yet.</p>'}</div></section></div></div>`;$('#logout').addEventListener('click',()=>{save('session',null);try{sessionStorage.removeItem('rokn-session');}catch{}location.href='login.html';});}
+}
+$$('[data-password-toggle]').forEach(b=>b.addEventListener('click',()=>{const input=$('input',b.parentElement),visible=input.type==='password';input.type=visible?'text':'password';b.innerHTML=`<i class="fa-solid fa-${visible?'eye':'eye-slash'}" aria-hidden="true"></i>`;b.setAttribute('aria-label',visible?'Hide password':'Show password');}));
+function flow(){try{return JSON.parse(sessionStorage.getItem('rokn-auth-flow'))||{};}catch{return {};}}
+function setFlow(value){try{sessionStorage.setItem('rokn-auth-flow',JSON.stringify(value));}catch{toast('Session storage is required for the demo verification flow');}}
+if($('#auth-email'))$('#auth-email').textContent=flow().email||'Return to the previous step to enter your email.';
+$('[data-resend]')?.addEventListener('click',()=>toast('Demo verification code: 123456. No email is sent.'));
+const authForm=$('[data-auth]');if(authForm)authForm.addEventListener('submit',e=>{
+ e.preventDefault();if(!authForm.reportValidity())return;const mode=authForm.dataset.auth,data=Object.fromEntries(new FormData(authForm)),error=$('[data-auth-error]',authForm);error.hidden=true;
+ const fail=message=>{error.textContent=message;error.hidden=false;};
+ if(mode==='signup'){if(data.newPassword!==data.confirmPassword){fail('Passwords do not match.');return;}setFlow({type:'signup',email:data.email,name:data.firstName+' '+data.lastName});location.href='check-email.html';}
+ else if(mode==='login'){setSession({email:data.email,name:data.email.split('@')[0]},!!data.remember);location.href='account.html';}
+ else if(mode==='forgot'){setFlow({type:'reset',email:data.email});location.href='check-email.html';}
+ else if(mode==='check-email'){if(!flow().email){location.href='forgot-password.html';return;}location.href='verify-email.html';}
+ else if(mode==='verify'){if(!flow().email){fail('Start with signup or password recovery first.');return;}if(data.code!=='123456'){fail('Incorrect demo code. Use 123456.');return;}const f=flow();setFlow({...f,verified:true});if(f.type==='signup'){setSession({email:f.email,name:f.name},false);location.href='email-success.html';}else location.href='reset-password.html';}
+ else if(mode==='reset'){if(!flow().verified){fail('Verify your demo code first.');return;}if(data.newPassword!==data.confirmPassword){fail('Passwords do not match.');return;}setFlow({});location.href='password-success.html';}
+ else if(mode==='email-success'){setFlow({});location.href='account.html';}
+ else if(mode==='password-success')location.href='login.html';
+});
+window.addEventListener('storage',e=>{if(e.key==='rokn-theme'){document.documentElement.dataset.theme=e.newValue||'light';updateTheme();}updateCounts();if(page==='cart')renderCart();if(page==='wishlist')renderWishlist();if(page==='collection')renderCollection();});
+})();
